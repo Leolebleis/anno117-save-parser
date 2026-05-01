@@ -1,36 +1,38 @@
 # anno117-save-parser
 
-Tools for extracting and analyzing **Anno 117: Pax Romana** save files (`.a8s`) on Windows.
+Extract and analyze **Anno 117: Pax Romana** save files (`.a8s`) on Windows.
 
-The pipeline converts an opaque ~3 MB binary save into ~120 MB of structured XML you can grep, parse, or hand to an AI assistant — no screenshots required.
+A `.a8s` save is a ~3 MB opaque binary. This pipeline expands it into ~120 MB of structured XML you can grep, parse, or hand to an AI assistant.
 
-## What you get
+## Scripts
 
-- **`extract.py`** — turns a `.a8s` save into XML files (meta, header, gamesetup, data + per-session blobs)
-- **`build_guid_map.py`** — parses the game's `assets.xml` into a 29k-entry `GUID → name` map
-- **`analyze.py`** — empire summary (cash, income, population, happiness, religion, prestige)
-- **`analyze_trade.py`** — enumerates trade routes, distinguishes player-owned vs NPC passive trade
-- **`count_buildings_v2.py`** — authoritative building counter (residences per tier, production buildings, marvels, etc.)
-- **`setup.py`** — one-shot installer for the third-party tooling
+| Script | Purpose |
+|--------|---------|
+| `extract.py` | Decode a `.a8s` save into XML (meta, header, gamesetup, data, per-session blobs) |
+| `build_guid_map.py` | Parse `assets.xml` into a 29k-entry `GUID -> name` map |
+| `analyze.py` | Empire summary: cash, income, population, happiness, religion, prestige |
+| `analyze_trade.py` | List trade routes; separate player-owned from NPC passive trade |
+| `count_buildings_v2.py` | Count residences per tier, production buildings, marvels, and more |
+| `setup.py` | Install third-party tooling |
 
 ## How it works
 
-`.a8s` is an [RDA v2.2 container](https://github.com/lysanntranvouez/RDAExplorer/wiki/RDA-File-Format) — same magic string as Anno 1800 (`Resource File V2.2`). Inside are 4 zlib-compressed [FileDB v1](https://github.com/anno-mods/FileDBReader) documents. The tools chain:
+`.a8s` is an [RDA v2.2 container](https://github.com/lysanntranvouez/RDAExplorer/wiki/RDA-File-Format) sharing the magic string `Resource File V2.2` with Anno 1800. Inside sit four zlib-compressed [FileDB v1](https://github.com/anno-mods/FileDBReader) documents. The pipeline:
 
-1. **`RdaConsole`** unpacks the outer RDA container → 4 inner `.a7s` files
-2. **`zlib.decompress`** strips the zlib wrapper from each
-3. **`FileDBReader`** converts FileDB binary → XML
+1. **`RdaConsole`** unpacks the outer RDA container into four inner `.a7s` files
+2. **`zlib.decompress`** strips each zlib wrapper
+3. **`FileDBReader`** converts FileDB binary to XML
 
-The session-state portion (the bulk of the save) contains nested `<BinaryData>` blobs that are themselves complete FileDB v1 documents — they're decoded the same way for full visibility into placed buildings, trade routes, etc.
+Session-state blobs, the bulk of the save, hold nested `<BinaryData>` elements that are themselves complete FileDB v1 documents. Decode them the same way to expose placed buildings, trade routes, and the rest.
 
 ## Setup (Windows + .NET 8 + Python 3.10+)
 
 ```bash
-# downloads RdaConsole, FileDBReader, patches FileDBReader for .NET 8
+# Downloads RdaConsole and FileDBReader; patches FileDBReader for .NET 8
 python setup.py
 ```
 
-That places everything under `tools/`. You also need `assets.xml` from your installed game — extract it directly from the game's RDA archive:
+This installs everything under `tools/`. You also need `assets.xml` from your installed game. Pull it directly from the game's RDA archive:
 
 ```bash
 # Steam path (adjust for Ubisoft Connect / Epic)
@@ -44,76 +46,74 @@ python build_guid_map.py --assets game_data/data/base/config/export/assets.xml -
 ## Usage
 
 ```bash
-# 1. extract a save
+# 1. Extract a save
 python extract.py \
     --save "$USERPROFILE/Documents/Anno 117 - Pax Romana/accounts/<guid>/<profile>/Autosave 256.a8s" \
     --out-dir ./out
 
-# 2. inspect the empire
+# 2. Inspect the empire
 python analyze.py --xml-dir ./out
 python analyze_trade.py --xml-dir ./out
 python count_buildings_v2.py --xml-dir ./out --guid-map guid_map.json
 ```
 
-`./out` will contain:
+`./out` contains:
 
 | File | Size | Contents |
 |------|------|----------|
 | `meta.xml` | ~360 B | Game version, save name |
 | `header.xml` | ~480 KB | Player profiles, map setup |
-| `gamesetup.xml` | ~70 KB | Map/scenario settings |
+| `gamesetup.xml` | ~70 KB | Map and scenario settings |
 | `data.xml` | ~120 MB | Full game state |
-| `session_blob_0.xml` | ~57 MB | Latium session (decoded from data.xml's BinaryData) |
+| `session_blob_0.xml` | ~57 MB | Latium session (decoded from `data.xml` `<BinaryData>`) |
 | `session_blob_1.xml` | ~60 MB | Albion session |
 
-Total extraction time: **~2 seconds** on a modern machine.
+A modern machine finishes extraction in **~2 seconds**.
 
-## Heads-up: scripts contain hard-coded participant IDs
+## Replace hard-coded participant IDs
 
-The analyzer scripts were calibrated against one specific save. Before running them on yours, find these constants and replace them:
+The analyzer scripts target one specific save. Before running them on yours, find these constants and replace them:
 
-| File | Constant | What it is |
-|------|----------|------------|
+| File | Constant | Meaning |
+|------|----------|---------|
 | `analyze.py`, `analyze_trade.py` | `HUMAN_PID_HEX = '29000000'` | Your participant ID in `EconomyManager`'s `<ParticipantGUID>` (LE hex) |
 | `count_buildings_v2.py` | `LATIUM_AREAS`, `ALBION_AREAS` | Your owned `AreaID`s per session |
 
 To find your `HUMAN_PID_HEX`:
-- Run `analyze.py` once. It already auto-detects the human via `find_human()` (heuristic: positive net income + multiple bought settlements). Look at the printed `pid` and convert to LE hex.
-- Or grep `data.xml` for `<ParticipantGUID>` in the `EconomyManager` block — there are typically 4 participants (1 human + 3 AI).
+- Run `analyze.py` once. `find_human()` already auto-detects the human via heuristic (positive net income plus multiple bought settlements). Read the printed `pid` and convert to LE hex.
+- Or grep `data.xml` for `<ParticipantGUID>` inside the `EconomyManager` block. Saves typically hold four participants: one human and three AI.
 
-To find your `AreaID`s: the `analyze_trade.py` output prints stations with `AreaOwner=<your-pid>`. Collect those AreaIDs.
-
-(Patches welcome to make this fully auto-detected.)
+To find your `AreaID`s, run `analyze_trade.py` and collect every AreaID whose station prints `AreaOwner=<your-pid>`.
 
 ## Reliability notes
 
-- **Use structured XML tag matching, not byte-pattern scans.** A naive byte-pattern scan of the binary blobs (e.g., counting how often a building's GUID appears as 4 bytes) produces wildly inflated counts because the same GUID gets referenced by registries, quest caches, upgrade-tier lists, and buff effects — not just placements. The byte-noise floor for "this building is registered in the game" can be 15–25 even when zero are placed.
-- **`PopulationManager.MaxReachedPopulationCount`** is the gold standard for "did I ever reach tier X" — if a tier ID is missing entirely, you've never had a single resident at that tier.
-- **`<guid>...</guid>` (lowercase) and `<GUID>...</GUID>` (uppercase)** both occur in session blobs depending on object type. The counter handles both.
+- **Use structured XML tag matching, not byte-pattern scans.** Counting how often a building's GUID appears as 4 bytes inflates results wildly: the same GUID surfaces in registries, quest caches, upgrade-tier lists, and buff effects, not just placements. The byte-noise floor for "this building is registered" sits at 15 to 25 even when zero exist on the map.
+- **`PopulationManager.MaxReachedPopulationCount`** is the gold standard for "did I ever reach tier X". A missing tier ID means you never housed a single resident at that tier.
+- Session blobs use both `<guid>...</guid>` and `<GUID>...</GUID>` depending on object type. The counter handles both.
 
-## What's NOT extracted
+## Out of scope
 
-- **Ship counts** — ships are placed entities but I haven't reverse-engineered which tag delineates them; the byte-pattern method gave unreliable numbers for ships specifically.
-- **Per-island building maps** — `count_buildings_v2.py` reports per-area but doesn't render a map.
-- **Storage levels per island** — visible in the data (`MetaStorageCount`, `Goods`) but not exposed by the current scripts.
+- **Ship counts.** Ships are placed entities, but the delineating tag remains unidentified; byte-pattern scans returned wildly inflated numbers for ships.
+- **Per-island building maps.** `count_buildings_v2.py` reports per-area but draws no map.
+- **Storage levels per island.** The data exposes `MetaStorageCount` and `Goods`, but the current scripts ignore them.
 
 ## Roadmap
 
-This is an MVP. Direction it should grow in:
+This is an MVP. Next directions:
 
-1. **JSON intermediate format.** XML is what FileDBReader produces; it's verbose, leaf values are hex strings, and anonymous list entries serialize as `<None>` with no semantic name. A post-processing step that emits typed JSON (decoding hex → int/float/string, naming list entries via known schema fragments) would make downstream analysis dramatically simpler.
-2. **Web frontend for data viz.** Once the data is JSON, a static site (residence tier breakdown, trade route map, production health by good) is straightforward.
-3. **Auto-detect human player + AreaIDs.** The current scripts hardcode IDs from one specific save; the heuristic is well-defined (positive net income + multiple bought settlements for the player, AreaOwner of player-owned trade-route stations for the islands) and just needs wiring up.
+1. **JSON intermediate format.** FileDBReader emits XML: verbose, hex-encoded leaves, anonymous list entries serialized as `<None>` with no semantic name. A post-processor that emits typed JSON, decoding hex into int, float, or string and naming list entries from known schema fragments, would simplify everything downstream.
+2. **Web frontend for visualization.** Once the data lives in JSON, a static site can render residence tiers, trade routes, and production health by good.
+3. **Auto-detect human player and AreaIDs.** The heuristic is well-defined (positive net income plus multiple bought settlements identifies the human; AreaOwner of player-owned trade-route stations identifies the islands) and only needs wiring up.
 
-When extending, prefer to keep `extract.py` as a thin pipeline shim and put schema knowledge / decoding logic into a separate Python module so it's reusable from a future JSON exporter.
+Keep `extract.py` as a thin pipeline shim. Put schema knowledge and decoding logic into a separate Python module so a future JSON exporter can reuse it.
 
-## License & legal
+## License and legal
 
-Code: pick your own license (suggest MIT). Game data files (`assets.xml`, save files, `guid_map.json` derived from `assets.xml`) belong to Ubisoft Blue Byte and are not redistributed.
+Code: pick your own license (MIT recommended). Game data files (`assets.xml`, save files, `guid_map.json` derived from `assets.xml`) belong to Ubisoft Blue Byte and ship nowhere.
 
-## Credits / dependencies
+## Credits and dependencies
 
 - [`anno-mods/RdaConsole`](https://github.com/anno-mods/RdaConsole) — RDA outer container extraction
-- [`anno-mods/FileDBReader`](https://github.com/anno-mods/FileDBReader) — FileDB binary → XML
+- [`anno-mods/FileDBReader`](https://github.com/anno-mods/FileDBReader) — FileDB binary to XML
 - [Anno modding wiki — RDA file format](https://github.com/lysanntranvouez/RDAExplorer/wiki/RDA-File-Format)
 - [`anno-mods/asset-extractor`](https://github.com/anno-mods/asset-extractor) — original inspiration for the asset extraction step
