@@ -2,7 +2,20 @@
 
 Extract and analyze Anno 117: Pax Romana `.a8s` saves on Windows.
 
-## Pipeline shape (don't reinvent)
+## Quick start
+
+```bash
+python setup.py                                                              # one-time tool install
+python build_guid_map.py --assets <path-to-extracted-assets.xml> --out guid_map.json
+python extract.py --save <path-to-.a8s> --out-dir ./out
+python analyze.py --xml-dir ./out                                            # also prints your participant ID
+python analyze_trade.py --xml-dir ./out
+python count_buildings_v2.py --xml-dir ./out --guid-map guid_map.json
+```
+
+Full setup (Steam path, asset extraction from the game's `config.rda`) lives in README.md.
+
+## Pipeline shape
 
 `.a8s` → RdaConsole → 4 zlib blobs → `zlib.decompress` → FileDB v1 → FileDBReader → XML. `extract.py` runs the chain.
 
@@ -22,6 +35,7 @@ Extract and analyze Anno 117: Pax Romana `.a8s` saves on Windows.
 - Anonymous FileDB list entries serialize as `<None>...</None>`.
 - Tag names containing spaces (e.g. `AI Time`) get dropped during conversion; use FileDBReader `-z` to rename if needed.
 - `<ID>16-hex-chars</ID>` encodes AreaID at chars 8–11 (bytes 4–5 of the 8-byte ObjectID).
+- **Where to grep what:** placed buildings and game objects live in `session_blob_*.xml`. Empire-level state (money, population aggregates, trade routes, religion, `MetaUniqueBuildingHandler`) lives in `data.xml`. Player metadata lives in `header.xml`. Don't search `data.xml` for individual placed buildings — they're inside the (already-decoded) `<BinaryData>` blobs.
 
 ## Per-save hardcoded constants (replace before running on a new save)
 
@@ -45,6 +59,6 @@ Extract and analyze Anno 117: Pax Romana `.a8s` saves on Windows.
 - Gitignored: `tools/`, `game_data/`, `guid_map.json`, `*.a8s`, `*.a7s`, `*.bin`, `/out/`. The Ubisoft asset data and the user's saves never ship.
 - Bash on Windows uses Unix paths (`/c/Users/...`); PowerShell tool available when needed.
 
-## Roadmap direction (don't lock decisions away from)
+## Roadmap direction
 
 Future: post-process XML → typed JSON (decoding hex into int/float/string), then a static-site frontend for visualization. Keep `extract.py` thin; put schema knowledge in a separate module so a JSON exporter can reuse it.
